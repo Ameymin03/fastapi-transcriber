@@ -4,7 +4,7 @@ import requests
 app = Flask(__name__)
 
 # FASTAPI_URL = "https://fastapi-transcriber.up.railway.app"
-FASTAPI_URL = "https://flask-transcriber-ui.onrender.com"
+FASTAPI_URL = "https://fastapi-transcriber.onrender.com"
 
 
 
