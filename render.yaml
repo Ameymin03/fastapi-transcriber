@@ -3,5 +3,5 @@ services:
     name: flask-transcriber-ui
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn main1:app"
+    startCommand: "gunicorn frontend:app"
     plan: free
