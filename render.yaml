@@ -1,17 +1,18 @@
 services:
   - type: web
-    name: flask-transcriber-ui
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn frontend:app --bind 0.0.0.0:5000"
-    plan: free
-    envVars:
-      - key: FASTAPI_URL
-        value: "https://fastapi-transcriber.onrender.com"  # URL of FastAPI service
-
-  - type: web
     name: fastapi-transcriber
     env: python
+    plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn backend:app --host 0.0.0.0 --port 8000"
+    envVars: []
+
+  - type: web
+    name: flask-transcriber-ui
+    env: python
     plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn frontend:app --bind 0.0.0.0:5000"
+    envVars:
+      - key: FASTAPI_URL
+        value: https://fastapi-transcriber.onrender.com
