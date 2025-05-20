@@ -1,18 +1,8 @@
+# Backend service (FastAPI)
 services:
   - type: web
-    name: fastapi-transcriber
+    name: fastapi-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend:app --host 0.0.0.0 --port $PORT
     env: python
-    plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn backend:app --host 0.0.0.0 --port $PORT"
-    envVars: []
-
-  - type: web
-    name: flask-transcriber-ui
-    env: python
-    plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn frontend:app --bind 0.0.0.0:$PORT"
-    envVars:
-      - key: FASTAPI_URL
-        value: ${fastapi-transcriber.URL}
