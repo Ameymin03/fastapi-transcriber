@@ -1,10 +1,14 @@
 from flask import Flask, render_template, request
 import requests
+import os
 
 app = Flask(__name__)
 
 # FASTAPI_URL = "https://fastapi-transcriber.up.railway.app"
-FASTAPI_URL = "https://fastapi-transcriber.onrender.com"
+#FASTAPI_URL = "https://fastapi-transcriber.onrender.com"
+
+FASTAPI_URL = os.environ.get("FASTAPI_URL", "http://localhost:8000")
+
 
 
 
