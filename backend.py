@@ -12,7 +12,7 @@ app = FastAPI()
 # Adds middleware to allow requests from any domain (*)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://flask-transcriber-ui.onrender.com"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
