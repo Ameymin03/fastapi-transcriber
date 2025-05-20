@@ -1,73 +1,127 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from youtube_transcript_api import YouTubeTranscriptApi
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 import re
+import os
+from typing import Optional
 
-#creating fastapi
-app = FastAPI()
+app = FastAPI(
+    title="YouTube Transcript API",
+    description="API for fetching and storing YouTube video transcripts",
+    version="1.0.0"
+)
 
-#Allowing Cross-Origin Requests
-# Adds middleware to allow requests from any domain (*)
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://flask-transcriber-ui.onrender.com"],
+    allow_origins=[
+        "https://flask-transcriber-ui.onrender.com",
+        "http://localhost:3000"  # For local development
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-#in-memory transcript storage
+# In-memory transcript storage with size limit
 transcript_store = {}
+MAX_STORE_SIZE = 100  # Prevent memory overload
 
-#function to extract yt-video ID
-def extract_video_id(url: str):
-    parsed_url = urlparse(url)
-    if parsed_url.hostname in ['www.youtube.com', 'youtube.com']:
-        if parsed_url.path == '/watch':
-            query_params = parse_qs(parsed_url.query)
-            return query_params.get('v', [None])[0]
-        #If URL is in the format youtube.com/watch?v=abc123, it extracts the v query parameter.
-        elif parsed_url.path.startswith('/embed/'):
-            return parsed_url.path.split('/embed/')[1]
-    elif parsed_url.hostname == 'youtu.be':
-        return parsed_url.path.lstrip('/')
+def extract_video_id(url: str) -> Optional[str]:
+    """Extract YouTube video ID from various URL formats"""
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
+        r'youtu\.be\/([0-9A-Za-z_-]{11})',
+        r'embed\/([0-9A-Za-z_-]{11})'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
     return None
 
-# def summarize_text(text: str) -> str:
-#     sentences = re.split(r'(?<=[.!?]) +', text)
-#     summary = ' '.join(sentences[:3])
-#     return summary if summary else text[:200] + "..."
-
-#Base route to check if the API is running.
-@app.get("/")
+@app.get("/", tags=["Health Check"])
 async def root():
-    return {"message": "YouTube Transcript API is running."}
+    """Health check endpoint"""
+    return {
+        "status": "active",
+        "service": "YouTube Transcript API",
+        "timestamp": datetime.now().isoformat()
+    }
 
-#Main route to process yt video
-@app.get("/process")
-async def process_video(video_url: str):
+@app.get("/process", tags=["Transcripts"])
+async def process_video(
+    video_url: str = Query(..., description="YouTube video URL"),
+    language: str = Query("en", description="Language code for transcript")
+):
+    """Fetch and store YouTube video transcript"""
     video_id = extract_video_id(video_url)
     if not video_id:
-        raise HTTPException(status_code=400, detail="Invalid or unsupported YouTube URL format.")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid YouTube URL. Supported formats: "
+                   "youtube.com/watch?v=ID, youtu.be/ID, youtube.com/embed/ID"
+        )
+
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        # Check cache first
+        if video_id in transcript_store:
+            return transcript_store[video_id]
+
+        # Fetch transcript
+        transcript = YouTubeTranscriptApi.get_transcript(
+            video_id,
+            languages=[language] if language != "all" else None
+        )
+        
         text = " ".join([item['text'] for item in transcript])
-        #summary = summarize_text(text)
+        
+        # Store data (with cache eviction if needed)
+        if len(transcript_store) >= MAX_STORE_SIZE:
+            oldest_key = next(iter(transcript_store))
+            transcript_store.pop(oldest_key)
+
         data = {
             "video_id": video_id,
             "video_url": video_url,
             "transcript": text,
-            #"summary": summary,
-            "timestamp": datetime.now().isoformat()
+            "language": language,
+            "timestamp": datetime.now().isoformat(),
+            "word_count": len(text.split())
         }
+        
         transcript_store[video_id] = data
         return data
+
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Transcript not available for this youtube video")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transcript not available: {str(e)}"
+        )
 
-@app.get("/all_transcripts")
-async def get_all_transcripts(): 
-    return list(transcript_store.values())
+@app.get("/transcripts", tags=["Transcripts"])
+async def get_all_transcripts(
+    limit: int = Query(10, description="Number of transcripts to return"),
+    skip: int = Query(0, description="Number of transcripts to skip")
+):
+    """Get paginated list of stored transcripts"""
+    transcripts = list(transcript_store.values())
+    return {
+        "count": len(transcripts),
+        "transcripts": transcripts[skip:skip+limit]
+    }
 
+@app.get("/transcripts/{video_id}", tags=["Transcripts"])
+async def get_transcript(video_id: str):
+    """Get specific transcript by video ID"""
+    if video_id not in transcript_store:
+        raise HTTPException(status_code=404, detail="Transcript not found")
+    return transcript_store[video_id]
 
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
