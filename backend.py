@@ -4,33 +4,42 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from datetime import datetime
 import re
 import os
-import uvicorn  # Explicit import for running the server
+import uvicorn
 from typing import Optional
 
+# Initialize FastAPI with production-ready settings
 app = FastAPI(
     title="YouTube Transcript API",
+    description="API for fetching YouTube video transcripts",
     version="1.0.0",
-    docs_url="/docs"
+    docs_url="/docs",
+    redoc_url=None,
+    servers=[{"url": "https://your-render-service.onrender.com", "description": "Production server"}]
 )
 
-# CORS Configuration
+# Configure CORS for production and development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production
+    allow_origins=[
+        "https://flask-transcriber-ui.onrender.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# In-memory store with maximum size
-transcript_store = {}
-MAX_STORE_SIZE = 100
+# In-memory cache with size limit
+transcript_cache = {}
+MAX_CACHE_SIZE = 100  # Prevents memory overload
 
 def extract_video_id(url: str) -> Optional[str]:
-    """Improved URL parsing with regex"""
+    """Robust YouTube video ID extraction from multiple URL formats"""
     patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11})',
-        r'youtu\.be\/([0-9A-Za-z_-]{11})',
-        r'embed\/([0-9A-Za-z_-]{11})'
+        r'(?:v=|\/)([0-9A-Za-z_-]{11})',  # Standard URLs
+        r'youtu\.be\/([0-9A-Za-z_-]{11})',  # Short URLs
+        r'embed\/([0-9A-Za-z_-]{11})'  # Embedded URLs
     ]
     for pattern in patterns:
         if match := re.search(pattern, url):
@@ -40,47 +49,97 @@ def extract_video_id(url: str) -> Optional[str]:
 @app.get("/")
 @app.head("/")
 async def health_check():
-    """Essential health check endpoint"""
+    """Render.com health check endpoint (must return 200 for HEAD requests)"""
     return Response(status_code=200)
 
 @app.get("/process")
 async def process_video(
-    video_url: str = Query(...),
-    language: str = Query("en")
+    video_url: str = Query(..., description="YouTube video URL"),
+    language: str = Query("en", description="Transcript language code")
 ):
+    """
+    Fetch and cache YouTube video transcript
+    - Supports multiple URL formats
+    - Handles 400+ error cases
+    - Implements cache management
+    """
     video_id = extract_video_id(video_url)
     if not video_id:
-        raise HTTPException(400, detail="Invalid YouTube URL")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid YouTube URL format. Supported examples:\n"
+                   "• https://www.youtube.com/watch?v=VIDEO_ID\n"
+                   "• https://youtu.be/VIDEO_ID\n"
+                   "• https://www.youtube.com/embed/VIDEO_ID"
+        )
+
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
+        # Return cached result if available
+        if video_id in transcript_cache:
+            return transcript_cache[video_id]
+
+        # Fetch fresh transcript
+        transcript = YouTubeTranscriptApi.get_transcript(
+            video_id,
+            languages=[language] if language != "all" else None
+        )
+        
+        # Process transcript text
         text = " ".join([item['text'] for item in transcript])
         
         # Manage cache size
-        if len(transcript_store) >= MAX_STORE_SIZE:
-            transcript_store.pop(next(iter(transcript_store)))
-            
-        data = {
+        if len(transcript_cache) >= MAX_CACHE_SIZE:
+            transcript_cache.pop(next(iter(transcript_cache)))
+
+        # Prepare response
+        result = {
             "video_id": video_id,
             "transcript": text,
-            "timestamp": datetime.now().isoformat()
+            "language": language,
+            "timestamp": datetime.now().isoformat(),
+            "word_count": len(text.split()),
+            "status": "success"
         }
-        transcript_store[video_id] = data
-        return data
-    except Exception as e:
-        raise HTTPException(400, detail=str(e))
+        
+        transcript_cache[video_id] = result
+        return result
 
-def run_server():
-    """Explicit server configuration for Render"""
+    except Exception as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transcript unavailable. Possible reasons:\n"
+                   f"- Subtitles disabled for this video\n"
+                   f"- Invalid language code: {language}\n"
+                   f"- Video doesn't exist\n"
+                   f"Technical details: {str(e)}"
+        )
+
+@app.get("/transcripts")
+async def list_transcripts(
+    limit: int = Query(10, ge=1, le=50),
+    offset: int = Query(0, ge=0)
+):
+    """Paginated list of cached transcripts"""
+    transcripts = list(transcript_cache.values())
+    return {
+        "count": len(transcripts),
+        "limit": limit,
+        "offset": offset,
+        "results": transcripts[offset:offset+limit]
+    }
+
+def start_application():
+    """Production-grade server configuration"""
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
-        app,
+        "backend:app",
         host="0.0.0.0",
         port=port,
-        log_level="info",
+        reload=False,
+        access_log=True,
         timeout_keep_alive=60,
-        access_log=True
+        workers=1
     )
 
 if __name__ == "__main__":
-    run_server()
+    start_application()
