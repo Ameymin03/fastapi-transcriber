@@ -5,9 +5,9 @@ import os
 app = Flask(__name__)
 
 # FASTAPI_URL = "https://fastapi-transcriber.up.railway.app"
-#FASTAPI_URL = "https://fastapi-transcriber-3.onrender.com"
+FASTAPI_URL = "https://fastapi-transcriber-3.onrender.com"
 
-FASTAPI_URL = os.environ.get("FASTAPI_URL", "https://fastapi-transcriber-3.onrender.com")
+
 
 
 
